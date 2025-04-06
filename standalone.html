@@ -5,11 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#2196f3">
     <meta name="description" content="View and organize social media posts from various platforms">
-    <title>Social Media Embed Viewer</title>
+    <title>Social Media Embed Viewer (Standalone)</title>
     <link rel="stylesheet" href="styles.css">
-    <link rel="manifest" href="manifest.json">
     <link rel="icon" type="image/svg+xml" href="icons/icon-192x192.svg">
-    <link rel="apple-touch-icon" href="icons/icon-192x192.svg">
     <!-- Twitter/X Widget -->
     <script>
         window.twttr = (function(d, s, id) {
@@ -35,10 +33,9 @@
 <body>
     <div id="app">
         <header>
-            <h1>Social Media Embed Viewer</h1>
+            <h1>Social Media Embed Viewer (Standalone)</h1>
             <div class="user-section">
-                <span id="userEmail"></span>
-                <button id="logoutButton" class="action-button">Logout</button>
+                <span id="userEmail">Standalone Mode</span>
             </div>
             <form id="linkForm" class="input-form">
                 <input type="url" id="linkInput" placeholder="Paste social media link here..." required>
@@ -48,11 +45,6 @@
             
             <div class="actions-container">
                 <div id="tagFilters" class="tag-filters"></div>
-                <div class="data-actions">
-                    <button id="exportData" class="action-button">Export Data</button>
-                    <input type="file" id="importFile" accept=".json" style="display: none">
-                    <button id="importData" class="action-button">Import Data</button>
-                </div>
             </div>
         </header>
         
@@ -60,7 +52,7 @@
             <div id="postsContainer" class="posts-container">
                 <!-- Posts will be rendered here -->
             </div>
-            <div id="loadingIndicator" class="loading-indicator">
+            <div id="loadingIndicator" class="loading-indicator" style="display: none;">
                 <div class="spinner"></div>
                 <p>Loading posts...</p>
             </div>
@@ -75,41 +67,6 @@
         </div>
     </div>
 
-    <script type="module" src="app-supabase.js"></script>
-    <script src="index-fix.js"></script>
-    <script src="debug-console.js"></script>
-    <script>
-        // Register service worker for PWA functionality
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js')
-                    .then(registration => {
-                        console.log('Service Worker registered with scope:', registration.scope);
-                    })
-                    .catch(error => {
-                        console.error('Service Worker registration failed:', error);
-                    });
-            });
-            
-            // Listen for messages from service worker (for shared URLs)
-            navigator.serviceWorker.addEventListener('message', event => {
-                if (event.data && event.data.type === 'SHARED_URL') {
-                    sessionStorage.setItem('pendingSharedUrl', event.data.url);
-                    window.location.href = './index.html?share=pending';
-                }
-            });
-        }
-        
-        // Request persistent storage for offline use
-        async function requestPersistentStorage() {
-            if (navigator.storage && navigator.storage.persist) {
-                const isPersisted = await navigator.storage.persist();
-                console.log(`Persistent storage granted: ${isPersisted}`);
-            }
-        }
-        
-        // Request persistent storage when page loads
-        window.addEventListener('load', requestPersistentStorage);
-    </script>
+    <script src="standalone.js"></script>
 </body>
 </html>

@@ -66,9 +66,13 @@ class DatabaseService {
   // Posts CRUD operations
   
   // Get all posts for current user
-  async getPosts() {
+  async getPosts(page = 0, pageSize = 10) {
     if (!this.supabase) await this.init();
     if (!this.user) throw new Error('User not authenticated');
+    
+    // Calculate range for pagination
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
     
     const { data, error } = await this.supabase
       .from('posts')
@@ -77,7 +81,8 @@ class DatabaseService {
         tags(*)
       `)
       .eq('user_id', this.user.id)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .range(from, to);
       
     if (error) throw error;
     

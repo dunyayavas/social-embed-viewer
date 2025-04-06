@@ -622,39 +622,30 @@ class SocialEmbedViewer {
 
     getYoutubeId(url) {
         const regex = /(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
-        const match = url.match(regex);
-        return match ? match[1] : null;
-    }
+        
+return wrapper;
+}
 
-    async renderPosts() {
-        // Debounce rendering to avoid multiple renders in quick succession
-        if (this._renderTimeout) {
-            clearTimeout(this._renderTimeout);
-        }
+getYoutubeId(url) {
+const regex = /(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+const match = url.match(regex);
+return match ? match[1] : null;
+}
+
+async renderPosts() {
+if (this._renderTimeout) {
+clearTimeout(this._renderTimeout);
+}
         
-        this._renderTimeout = setTimeout(async () => {
-            await this._renderPostsInternal();
-            this._renderTimeout = null;
-        }, 50);
-    }
-    
-    async _renderPostsInternal() {
-        const postsContainer = document.getElementById('posts');
-        if (!postsContainer) return;
-        
-        // Reset pagination when filters change or on initial load
-        this.currentPage = 0;
-        this.allPostsLoaded = false;
-        
-        // Clear container more efficiently
-        while (postsContainer.firstChild) {
-            postsContainer.removeChild(postsContainer.firstChild);
-        }
-        
-        // Filter posts if filters are active
-        let filteredPosts = this.posts;
-        if (this.activeFilters.size > 0) {
-            filteredPosts = this.posts.filter(post => {
+this._renderTimeout = setTimeout(async () => {
+await this._renderPostsInternal();
+this._renderTimeout = null;
+}, 50);
+}
+
+async _renderPostsInternal() {
+const postsContainer = document.getElementById('postsContainer');
+if (!postsContainer) return;
                 // Only show posts that have ALL selected tags
                 return Array.from(this.activeFilters).every(tag => post.tags.includes(tag));
             });
@@ -686,7 +677,7 @@ class SocialEmbedViewer {
         const loadingIndicator = document.getElementById('loading-indicator');
         if (loadingIndicator) loadingIndicator.style.display = 'block';
         
-        const postsContainer = document.getElementById('posts');
+        const postsContainer = document.getElementById('postsContainer');
         if (!postsContainer) return;
         
         // Get the current batch of posts

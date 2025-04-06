@@ -32,8 +32,14 @@ class SocialEmbedViewer {
             // Initialize event listeners
             this.initializeEventListeners();
             
-            // Always load posts, even if not authenticated
-            this.loadPosts();
+            // Add sample posts if none exist
+            if (this.posts.length === 0) {
+                console.log('No posts found, adding samples...');
+                this.addSamplePosts();
+            }
+            
+            // Render posts immediately
+            this.renderPosts();
             
             // Check for pending shared URL
             this.checkPendingSharedUrl();
@@ -50,11 +56,7 @@ class SocialEmbedViewer {
                 app.style.display = 'block';
             }
             
-            // Add sample posts if none exist
-            if (this.posts.length === 0) {
-                console.log('No posts found, adding samples...');
-                this.addSamplePosts();
-            }
+
             
             this.isInitialized = true;
             console.log('App initialized successfully');
@@ -217,6 +219,64 @@ class SocialEmbedViewer {
         console.log('Added sample posts:', this.posts.length);
     }
     
+    // Load posts from database or fallback to local storage
+    async loadPosts() {
+        console.log('Loading posts...');
+        try {
+            if (this.isAuthenticated()) {
+                // Try to load from Supabase
+                try {
+                    const posts = await dbService.getPosts();
+                    this.posts = posts;
+                    console.log('Loaded posts from Supabase:', posts.length);
+                } catch (error) {
+                    console.error('Error loading posts from Supabase:', error);
+                    // Fallback to IndexedDB
+                    await this.loadFromIndexedDB();
+                }
+            } else {
+                // Not authenticated, try to load from IndexedDB
+                await this.loadFromIndexedDB();
+                
+                // If still no posts, add samples
+                if (this.posts.length === 0) {
+                    this.addSamplePosts();
+                }
+            }
+            
+            // Render the posts
+            this.renderPosts();
+        } catch (error) {
+            console.error('Error in loadPosts:', error);
+            // If all else fails, add sample posts
+            if (this.posts.length === 0) {
+                this.addSamplePosts();
+                this.renderPosts();
+            }
+        }
+    }
+    
+    // Load posts from IndexedDB
+    async loadFromIndexedDB() {
+        console.log('Loading posts from IndexedDB...');
+        try {
+            if (!this.db) {
+                console.warn('IndexedDB not initialized');
+                return;
+            }
+            
+            const posts = await this.getPostsFromIndexedDB();
+            if (posts && posts.length > 0) {
+                this.posts = posts;
+                console.log('Loaded posts from IndexedDB:', posts.length);
+            } else {
+                console.log('No posts found in IndexedDB');
+            }
+        } catch (error) {
+            console.error('Error loading from IndexedDB:', error);
+        }
+    }
+    
     checkPendingSharedUrl() {
         // Check if there's a pending shared URL from mobile
         const urlParams = new URLSearchParams(window.location.search);
@@ -373,9 +433,13 @@ class SocialEmbedViewer {
     }
     
     createPostElement(post) {
+        console.log('Creating post element for:', post);
+        // Create post container
         const postElement = document.createElement('div');
         postElement.className = 'post';
+        postElement.id = `post-${post.id}`;
         postElement.dataset.id = post.id;
+        postElement.dataset.type = post.type || 'unknown';
         
         // Create post header
         const postHeader = document.createElement('div');
@@ -389,104 +453,89 @@ class SocialEmbedViewer {
         const deleteButton = document.createElement('button');
         deleteButton.className = 'delete-button';
         deleteButton.innerHTML = '&times;';
-        deleteButton.addEventListener('click', () => this.deletePost(post.id));
+        deleteButton.title = 'Delete post';
+        deleteButton.addEventListener('click', () => this.handleDeletePost(post.id));
         
+        // Create edit tags button
+        const editTagsButton = document.createElement('button');
+        editTagsButton.className = 'edit-tags-button';
+        editTagsButton.innerHTML = '🏷️';
+        editTagsButton.title = 'Edit tags';
+        editTagsButton.addEventListener('click', () => this.handleEditTags(post.id));
+        
+        // Add buttons to post actions
+        postActions.appendChild(editTagsButton);
         postActions.appendChild(deleteButton);
+        
+        // Create tags container
+        const tagsContainer = document.createElement('div');
+        tagsContainer.className = 'post-tags';
+        
+        // Add tags if they exist
+        if (post.tags && post.tags.length > 0) {
+            post.tags.forEach(tag => {
+                // Check if tag is a string or an object
+                const tagName = typeof tag === 'string' ? tag : tag.name;
+                
+                const tagElement = document.createElement('span');
+                tagElement.className = 'tag';
+                tagElement.textContent = tagName;
+                tagElement.addEventListener('click', () => this.filterByTag(tagName));
+                tagsContainer.appendChild(tagElement);
+            });
+        }
+        
+        // Add elements to post header
+        postHeader.appendChild(tagsContainer);
         postHeader.appendChild(postActions);
         
         // Create post content
         const postContent = document.createElement('div');
         postContent.className = 'post-content';
         
+        // Add URL as text above the embed
+        const urlText = document.createElement('div');
+        urlText.className = 'post-url';
+        const urlLink = document.createElement('a');
+        urlLink.href = post.url;
+        urlLink.textContent = post.url;
+        urlLink.target = '_blank';
+        urlLink.rel = 'noopener noreferrer';
+        urlText.appendChild(urlLink);
+        postContent.appendChild(urlText);
+        
         // Create embed container
         const embedContainer = document.createElement('div');
         embedContainer.className = 'embed-container';
-        embedContainer.innerHTML = `<div class="loading-embed">Loading ${post.type} embed...</div>`;
         
-        // Load embed
-        this.loadEmbed(post, embedContainer);
+        console.log('Loading embed for post type:', post.type);
+        // Load appropriate embed based on post type
+        switch (post.type) {
+            case 'twitter':
+                this.loadTwitterEmbed(post, embedContainer);
+                break;
+            case 'instagram':
+                this.loadInstagramEmbed(post, embedContainer);
+                break;
+            case 'youtube':
+                this.loadYoutubeEmbed(post, embedContainer);
+                break;
+            case 'linkedin':
+                this.loadLinkedInEmbed(post, embedContainer);
+                break;
+            default:
+                // For unknown types, try to load a website preview
+                this.loadGenericEmbed(post, embedContainer);
+        }
         
+        // Add embed container to post content
         postContent.appendChild(embedContainer);
         
-        // Create post tags
-        const tagsContainer = document.createElement('div');
-        tagsContainer.className = 'post-tags';
-        
-        // Add tags
-        post.tags.forEach(tag => {
-            const tagElement = document.createElement('span');
-            tagElement.className = 'tag';
-            tagElement.textContent = tag;
-            tagElement.addEventListener('click', () => {
-                // Toggle tag filter
-                if (this.activeTags.has(tag)) {
-                    this.activeTags.delete(tag);
-                } else {
-                    this.activeTags.add(tag);
-                }
-                this.renderPosts();
-            });
-            tagsContainer.appendChild(tagElement);
-        });
-        
-        // Add tag input
-        const addTagContainer = document.createElement('div');
-        addTagContainer.className = 'add-tag-container';
-        
-        const addTagButton = document.createElement('button');
-        addTagButton.className = 'add-tag-button';
-        addTagButton.textContent = '+';
-        addTagButton.addEventListener('click', () => {
-            const tagInput = document.createElement('input');
-            tagInput.className = 'tag-input';
-            tagInput.placeholder = 'Add tag';
-            
-            addTagContainer.innerHTML = '';
-            addTagContainer.appendChild(tagInput);
-            
-            tagInput.focus();
-            
-            // Handle tag input blur
-            tagInput.addEventListener('blur', () => {
-                const newTag = tagInput.value.trim();
-                if (newTag && !post.tags.includes(newTag)) {
-                    post.tags.push(newTag);
-                    this.updatePost(post);
-                }
-                addTagContainer.innerHTML = '';
-                addTagContainer.appendChild(addTagButton);
-            });
-            
-            // Handle tag input enter
-            tagInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    const newTag = tagInput.value.trim();
-                    if (newTag && !post.tags.includes(newTag)) {
-                        post.tags.push(newTag);
-                        this.updatePost(post);
-                    }
-                    addTagContainer.innerHTML = '';
-                    addTagContainer.appendChild(addTagButton);
-                }
-            });
-        });
-        
-        addTagContainer.appendChild(addTagButton);
-        tagsContainer.appendChild(addTagContainer);
-        
-        postContent.appendChild(tagsContainer);
-        
-        // Add post date
-        const postDate = document.createElement('div');
-        postDate.className = 'post-date';
-        postDate.textContent = new Date(post.date).toLocaleDateString();
-        
-        postContent.appendChild(postDate);
-        
-        // Assemble post
+        // Add post header and content to post element
         postElement.appendChild(postHeader);
         postElement.appendChild(postContent);
         
+        console.log('Post element created:', postElement);
         return postElement;
     }
     
@@ -515,39 +564,125 @@ class SocialEmbedViewer {
     }
     
     loadTwitterEmbed(post, container) {
-        container.innerHTML = `<blockquote class="twitter-tweet"><a href="${post.url}"></a></blockquote>`;
+        console.log('Loading Twitter embed for:', post.url);
+        
+        // Load Twitter widget script if not already loaded
+        if (!window.twttr) {
+            console.log('Loading Twitter widget script');
+            const script = document.createElement('script');
+            script.src = 'https://platform.twitter.com/widgets.js';
+            script.async = true;
+            script.charset = 'utf-8';
+            document.head.appendChild(script);
+            
+            // Define twttr ready function if not already defined
+            window.twttr = {
+                _e: [],
+                ready: function(f) {
+                    this._e.push(f);
+                }
+            };
+        }
+        
+        // Create blockquote element for the tweet
+        container.innerHTML = `
+            <blockquote class="twitter-tweet" data-lang="en">
+                <a href="${post.url}">Loading tweet...</a>
+            </blockquote>
+        `;
+        
+        // Render the tweet
         if (window.twttr && window.twttr.widgets) {
-            window.twttr.widgets.load(container);
+            console.log('Twitter widgets API available, loading tweet');
+            setTimeout(() => {
+                window.twttr.widgets.load(container);
+            }, 100);
+        } else {
+            console.log('Twitter widgets API not available yet, will load when ready');
         }
     }
     
     loadInstagramEmbed(post, container) {
+        console.log('Loading Instagram embed for:', post.url);
         const postId = post.url.split('/').slice(-2)[0];
-        container.innerHTML = `<blockquote class="instagram-media" data-instgrm-permalink="${post.url}"></blockquote>`;
+        console.log('Extracted Instagram ID:', postId);
+        
+        // Load Instagram embed script if not already loaded
+        if (!window.instgrm) {
+            console.log('Loading Instagram embed script');
+            const script = document.createElement('script');
+            script.src = 'https://www.instagram.com/embed.js';
+            script.async = true;
+            script.defer = true;
+            document.head.appendChild(script);
+            
+            // Create a placeholder for instgrm
+            window.instgrm = window.instgrm || {};
+            window.instgrm.Embeds = window.instgrm.Embeds || {};
+            window.instgrm.Embeds.process = window.instgrm.Embeds.process || function() {
+                console.log('Instagram Embeds.process called before script loaded');
+            };
+        }
+        
+        // Create blockquote element for the Instagram post
+        container.innerHTML = `
+            <blockquote class="instagram-media" data-instgrm-captioned data-instgrm-permalink="${post.url}">
+                <p>Loading Instagram post...</p>
+            </blockquote>
+        `;
+        
+        // Process the embed
         if (window.instgrm && window.instgrm.Embeds) {
-            window.instgrm.Embeds.process(container);
+            console.log('Instagram Embeds API available, processing embed');
+            setTimeout(() => {
+                window.instgrm.Embeds.process(container);
+            }, 100);
+        } else {
+            console.log('Instagram Embeds API not available yet, will process when ready');
         }
     }
     
     loadYoutubeEmbed(post, container) {
+        console.log('Loading YouTube embed for:', post.url);
         const videoId = this.getYoutubeId(post.url);
+        console.log('Extracted YouTube ID:', videoId);
+        
         if (videoId) {
-            container.innerHTML = `<iframe width="100%" height="315" src="https://www.youtube.com/embed/${videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
+            container.innerHTML = `
+                <div class="youtube-embed-container">
+                    <iframe width="100%" height="315" 
+                        src="https://www.youtube.com/embed/${videoId}" 
+                        frameborder="0" 
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                        allowfullscreen>
+                    </iframe>
+                </div>
+            `;
+            console.log('YouTube iframe created and added to container');
         } else {
             container.innerHTML = `<div class="embed-error">Invalid YouTube URL</div>`;
+            console.error('Invalid YouTube URL:', post.url);
         }
     }
     
     loadLinkedInEmbed(post, container) {
+        console.log('Loading LinkedIn embed for:', post.url);
         // LinkedIn doesn't have a simple embed API, so we'll create a preview card
         container.innerHTML = `
             <div class="linkedin-preview">
                 <div class="linkedin-preview-content">
+                    <div class="linkedin-logo">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48">
+                            <path fill="#0077B5" d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/>
+                        </svg>
+                    </div>
                     <h3>LinkedIn Post</h3>
-                    <p>LinkedIn doesn't support direct embeds. <a href="${post.url}" target="_blank" rel="noopener noreferrer">Open in LinkedIn</a></p>
+                    <p>LinkedIn doesn't support direct embeds.</p>
+                    <a href="${post.url}" target="_blank" rel="noopener noreferrer" class="linkedin-button">Open in LinkedIn</a>
                 </div>
             </div>
         `;
+        console.log('LinkedIn preview card created');
     }
     
     loadGenericEmbed(post, container) {
@@ -599,9 +734,25 @@ class SocialEmbedViewer {
     }
     
     getYoutubeId(url) {
-        const regex = /(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
-        const match = url.match(regex);
-        return match ? match[1] : null;
+        console.log('Extracting YouTube ID from:', url);
+        // Handle various YouTube URL formats
+        const patterns = [
+            /youtube\.com\/watch\?v=([\w-]+)/,  // Standard watch URL
+            /youtu\.be\/([\w-]+)/,              // Shortened URL
+            /youtube\.com\/embed\/([\w-]+)/,    // Embed URL
+            /youtube\.com\/v\/([\w-]+)/         // Old embed URL
+        ];
+        
+        for (const pattern of patterns) {
+            const match = url.match(pattern);
+            if (match && match[1]) {
+                console.log('Extracted YouTube ID:', match[1]);
+                return match[1];
+            }
+        }
+        
+        console.warn('Could not extract YouTube ID from URL:', url);
+        return false;
     }
     
     updateAllTags() {

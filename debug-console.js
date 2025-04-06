@@ -87,12 +87,18 @@ document.addEventListener('DOMContentLoaded', function() {
         }
       });
       
-      // Try to manually render posts
+      // Check if posts are already rendered
       try {
-        console.log('Attempting to manually render posts...');
-        window.app.renderPosts();
+        console.log('Checking if posts are rendered...');
+        const postsContainer = document.getElementById('postsContainer');
+        if (postsContainer && postsContainer.children.length === 0 && window.app.posts.length > 0) {
+          console.log('Posts container is empty but we have posts, rendering...');
+          window.app.renderPosts();
+        } else {
+          console.log('Posts already rendered or no posts available');
+        }
       } catch (error) {
-        console.error('Error manually rendering posts:', error);
+        console.error('Error checking posts:', error);
       }
     }
   }, 1000);

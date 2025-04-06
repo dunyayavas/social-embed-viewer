@@ -38,8 +38,8 @@ class SocialEmbedViewer {
                 this.addSamplePosts();
             }
             
-            // Render posts immediately
-            this.renderPosts();
+            // Render posts only once during initialization
+            // We'll call this at the end of init to avoid duplicate renders
             
             // Check for pending shared URL
             this.checkPendingSharedUrl();
@@ -60,6 +60,9 @@ class SocialEmbedViewer {
             
             this.isInitialized = true;
             console.log('App initialized successfully');
+            
+            // Now render posts once initialization is complete
+            this.renderPosts();
         } catch (error) {
             console.error('Initialization error:', error);
         }
@@ -244,14 +247,14 @@ class SocialEmbedViewer {
                 }
             }
             
-            // Render the posts
-            this.renderPosts();
+            // We won't render posts here to avoid duplicate renders
+            // The caller should render posts if needed
         } catch (error) {
             console.error('Error in loadPosts:', error);
             // If all else fails, add sample posts
             if (this.posts.length === 0) {
                 this.addSamplePosts();
-                this.renderPosts();
+                // We won't render posts here either
             }
         }
     }
@@ -324,7 +327,10 @@ class SocialEmbedViewer {
     }
     
     async renderPosts(appendMode = false) {
-        if (this.isLoading) return;
+        if (this.isLoading) {
+            console.log('Already loading posts, skipping render');
+            return;
+        }
         this.isLoading = true;
         
         try {
@@ -332,11 +338,13 @@ class SocialEmbedViewer {
             const postsContainer = document.getElementById('postsContainer');
             if (!postsContainer) {
                 console.error('Posts container not found!');
+                this.isLoading = false;
                 return;
             }
             
             // Clear container if not appending
             if (!appendMode) {
+                console.log('Clearing posts container');
                 postsContainer.innerHTML = '';
             }
             
@@ -344,23 +352,24 @@ class SocialEmbedViewer {
             const loadingIndicator = document.getElementById('loadingIndicator');
             if (loadingIndicator) loadingIndicator.style.display = 'flex';
             
-            // Get posts from database
-            let posts = [];
-            if (this.isAuthenticated()) {
+            // Use the posts we already have in memory
+            let posts = this.posts;
+            console.log('Using existing posts from memory:', posts.length);
+            
+            // Only fetch from database if we don't have posts in memory
+            if (posts.length === 0 && this.isAuthenticated()) {
                 try {
                     // Try to get posts from Supabase
                     posts = await dbService.getPosts(this.currentPage, this.postsPerPage);
+                    this.posts = posts; // Update our local cache
                     console.log('Loaded posts from Supabase:', posts.length);
                 } catch (error) {
                     console.error('Error loading posts from Supabase:', error);
                     // Fallback to IndexedDB
                     posts = await this.getPostsFromIndexedDB();
+                    this.posts = posts; // Update our local cache
                     console.log('Loaded posts from IndexedDB:', posts.length);
                 }
-            } else {
-                // Not authenticated, use the posts we already have
-                posts = this.posts;
-                console.log('Using existing posts:', posts.length);
             }
             
             this.posts = appendMode ? [...this.posts, ...posts] : posts;

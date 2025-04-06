@@ -1,0 +1,895 @@
+class SocialEmbedViewer {
+    constructor() {
+        this.db = null;
+        this.posts = [];
+        this.activeFilters = new Set();
+        this.initializeDB();
+        this.initializeEventListeners();
+    }
+
+    async initializeDB() {
+        try {
+            // Initialize IndexedDB
+            const request = indexedDB.open('socialEmbedDB', 1);
+
+            request.onerror = (event) => {
+                console.error('Database error:', event.target.error);
+                // Fallback to localStorage if IndexedDB fails
+                this.db = null;
+                this.loadFromLocalStorage();
+            };
+
+            request.onupgradeneeded = (event) => {
+                console.log('Upgrading database...');
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains('posts')) {
+                    db.createObjectStore('posts', { keyPath: 'id' });
+                    console.log('Posts store created');
+                }
+            };
+
+            request.onsuccess = (event) => {
+                console.log('Database initialized successfully');
+                this.db = event.target.result;
+                this.loadPosts();
+            };
+        } catch (error) {
+            console.error('Error initializing database:', error);
+            this.db = null;
+            this.loadFromLocalStorage();
+        }
+    }
+
+    initializeEventListeners() {
+        document.getElementById('linkForm').addEventListener('submit', (e) => this.handleSubmit(e));
+        this.renderAllTags();
+    }
+
+    async loadPosts() {
+        console.log('Loading posts...');
+        try {
+            if (this.db) {
+                const transaction = this.db.transaction(['posts'], 'readonly');
+                const store = transaction.objectStore('posts');
+                const request = store.getAll();
+
+                request.onsuccess = () => {
+                    console.log('Posts loaded from IndexedDB:', request.result);
+                    this.posts = request.result || [];
+                    this.renderPosts();
+                    this.renderAllTags();
+                };
+
+                request.onerror = (error) => {
+                    console.error('Error loading posts from IndexedDB:', error);
+                    this.loadFromLocalStorage();
+                };
+            } else {
+                this.loadFromLocalStorage();
+            }
+        } catch (error) {
+            console.error('Error in loadPosts:', error);
+            this.loadFromLocalStorage();
+        }
+    }
+
+    loadFromLocalStorage() {
+        this.posts = JSON.parse(localStorage.getItem('posts') || '[]');
+        this.renderPosts();
+        this.renderAllTags();
+    }
+
+    async savePost(post) {
+        try {
+            if (this.db) {
+                const transaction = this.db.transaction(['posts'], 'readwrite');
+                const store = transaction.objectStore('posts');
+                const request = store.add(post);
+                
+                request.onsuccess = () => {
+                    console.log('Post saved to IndexedDB successfully');
+                    this.loadPosts();
+                };
+                
+                request.onerror = () => {
+                    console.error('Error saving to IndexedDB:', request.error);
+                    // Fallback to localStorage
+                    this.posts.push(post);
+                    localStorage.setItem('posts', JSON.stringify(this.posts));
+                    this.loadPosts();
+                };
+            } else {
+                this.posts.push(post);
+                localStorage.setItem('posts', JSON.stringify(this.posts));
+                this.loadPosts();
+            }
+        } catch (error) {
+            console.error('Error in savePost:', error);
+            throw error;
+        }
+    }
+
+    async deletePost(id) {
+        try {
+            // Remove card from UI immediately
+            const card = document.querySelector(`[data-post-id="${id}"]`);
+            if (card) {
+                card.classList.add('removing');
+                // Use animation to fade out
+                setTimeout(() => {
+                    card.remove();
+                }, 300); // Match this with CSS animation duration
+            }
+            
+            // Update local array
+            this.posts = this.posts.filter(p => p.id !== id);
+            
+            // Update tags UI
+            this.renderAllTags();
+            
+            // Update storage in background
+            if (this.db) {
+                const transaction = this.db.transaction(['posts'], 'readwrite');
+                const store = transaction.objectStore('posts');
+                const request = store.delete(id);
+                
+                request.onsuccess = () => {
+                    console.log('Post deleted from IndexedDB');
+                };
+            } else {
+                localStorage.setItem('posts', JSON.stringify(this.posts));
+            }
+        } catch (error) {
+            console.error('Error deleting post:', error);
+        }
+    }
+
+    async updatePost(post) {
+        try {
+            console.log('updatePost called with:', JSON.stringify(post.tags));
+            // Update local array
+            const index = this.posts.findIndex(p => p.id === post.id);
+            console.log('Index of post:', index);
+            if (index !== -1) {
+                // Update local data
+                this.posts[index] = post;
+                
+                // Update filter tags 
+                this.renderAllTags();
+                
+                // Update storage in background
+                if (this.db) {
+                    const transaction = this.db.transaction(['posts'], 'readwrite');
+                    const store = transaction.objectStore('posts');
+                    const request = store.put(post);
+                    request.onsuccess = () => {
+                        console.log('Post updated in IndexedDB');
+                    };
+                } else {
+                    localStorage.setItem('posts', JSON.stringify(this.posts));
+                }
+            }
+        } catch (error) {
+            console.error('Error updating post:', error);
+        }
+    }
+
+    async handleSubmit(e) {
+        e.preventDefault();
+        const linkInput = document.getElementById('linkInput');
+        const tagInput = document.getElementById('tagInput');
+        const url = linkInput.value.trim();
+        const tagsText = tagInput.value.trim();
+
+        if (!url) return;
+
+        // Process tags - split by comma and trim whitespace
+        const tags = tagsText ? tagsText.split(',').map(tag => tag.trim()).filter(tag => tag !== '') : [];
+        
+        const post = {
+            id: Date.now().toString(),
+            url,
+            type: this.getLinkType(url),
+            tags: tags,
+            date: new Date().toISOString()
+        };
+
+        try {
+            await this.savePost(post);
+            linkInput.value = '';
+            tagInput.value = '';
+            
+            // Show feedback
+            const feedback = document.createElement('div');
+            feedback.className = 'submit-feedback';
+            feedback.textContent = `Link added${tags.length > 0 ? ' with ' + tags.length + ' tag(s)' : ''}`;
+            
+            const form = document.getElementById('linkForm');
+            form.appendChild(feedback);
+            
+            // Remove feedback after 3 seconds
+            setTimeout(() => {
+                if (feedback.parentNode) {
+                    feedback.remove();
+                }
+            }, 3000);
+        } catch (error) {
+            console.error('Error adding link:', error);
+        }
+    }
+
+    getLinkType(url) {
+        try {
+            const urlObj = new URL(url);
+            const hostname = urlObj.hostname.toLowerCase();
+            
+            if (hostname.includes('twitter.com') || hostname.includes('x.com')) {
+                return 'twitter';
+            } else if (hostname.includes('instagram.com')) {
+                return 'instagram';
+            } else if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
+                return 'youtube';
+            } else if (hostname.includes('linkedin.com')) {
+                console.log('Detected LinkedIn URL:', url);
+                return 'linkedin';
+            }
+            
+            return 'website';
+        } catch (e) {
+            console.error('Error in getLinkType:', e);
+            return 'unknown';
+        }
+    }
+
+    getAllTags() {
+        const tags = new Set();
+        this.posts.forEach(post => {
+            post.tags.forEach(tag => tags.add(tag));
+        });
+        return Array.from(tags).sort();
+    }
+
+    renderAllTags() {
+        const filterContainer = document.getElementById('tagFilters');
+        if (!filterContainer) {
+            console.log('Tag filters container not found');
+            return;
+        }
+        
+        filterContainer.innerHTML = '';
+        
+        this.getAllTags().forEach(tag => {
+            const tagButton = document.createElement('button');
+            tagButton.className = this.activeFilters.has(tag) ? 'tag-filter active' : 'tag-filter';
+            tagButton.textContent = tag;
+            
+            tagButton.addEventListener('click', () => {
+                if (this.activeFilters.has(tag)) {
+                    this.activeFilters.delete(tag);
+                } else {
+                    this.activeFilters.add(tag);
+                }
+                this.renderPosts();
+                this.renderAllTags();
+            });
+            
+            filterContainer.appendChild(tagButton);
+        });
+    }
+
+    async renderPost(post) {
+        const postsContainer = document.getElementById('posts');
+        const newCard = this.createPostCard(post);
+        
+        postsContainer.appendChild(newCard);
+        
+        // Process embeds after being added to DOM
+        if (window.twttr && window.twttr.widgets) {
+            window.twttr.widgets.load(newCard);
+        }
+        if (window.instgrm) {
+            window.instgrm.Embeds.process(newCard);
+        }
+    }
+
+    createPostCard(post) {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.setAttribute('data-post-id', post.id);
+        
+        // Create embed container
+        const embedContainer = this.createEmbed(post);
+        card.appendChild(embedContainer);
+        
+        // Create tags section
+        const tagsDiv = document.createElement('div');
+        tagsDiv.className = 'card-tags';
+        
+        const tagsContainer = document.createElement('div');
+        tagsContainer.className = 'tags-container';
+
+        // Create and append tags
+        post.tags.forEach(tag => {
+            const tagSpan = document.createElement('span');
+            tagSpan.className = 'tag';
+            tagSpan.innerHTML = `
+                ${tag}
+                <button class="tag-delete" aria-label="Remove tag">&times;</button>
+            `;
+            tagSpan.querySelector('.tag-delete').addEventListener('click', async (e) => {
+                e.stopPropagation();
+                
+                // Remove from data model
+                post.tags = post.tags.filter(t => t !== tag);
+                
+                // Remove from UI
+                tagSpan.remove();
+                
+                // Update storage
+                await this.updatePost(post);
+            });
+            tagsContainer.appendChild(tagSpan);
+        });
+        
+        // Create tag management container
+        const tagManageContainer = document.createElement('div');
+        tagManageContainer.className = 'tag-input-container';
+        
+        // Create tag input
+        const tagInput = document.createElement('input');
+        tagInput.type = 'text';
+        tagInput.className = 'inline-tag-input';
+        tagInput.placeholder = 'Add tag...';
+        tagInput.style.display = 'none';
+        
+        // Create add button
+        const addTagButton = document.createElement('button');
+        addTagButton.className = 'add-tag-button';
+        addTagButton.innerHTML = '<span>+</span>';
+        
+        // Add button click handler
+        addTagButton.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Add tag button clicked');
+            
+            if (tagInput.style.display === 'none') {
+                tagInput.style.display = 'block';
+                tagInput.focus();
+            } else {
+                tagInput.style.display = 'none';
+            }
+        });
+        
+        // Tag input handler
+        tagInput.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter') {
+                const newTag = tagInput.value.trim();
+                if (newTag) {
+                    // Create new tag element
+                    const tagSpan = document.createElement('span');
+                    tagSpan.className = 'tag';
+                    tagSpan.innerHTML = `
+                        ${newTag}
+                        <button class="tag-delete" aria-label="Remove tag">&times;</button>
+                    `;
+                    
+                    // Add delete handler
+                    tagSpan.querySelector('.tag-delete').addEventListener('click', async (evt) => {
+                        evt.stopPropagation();
+                        // Update data
+                        post.tags = post.tags.filter(t => t !== newTag);
+                        // Update UI
+                        tagSpan.remove();
+                        // Update storage
+                        await this.updatePost(post);
+                    });
+                    
+                    // Add to UI immediately
+                    tagsContainer.appendChild(tagSpan);
+                    
+                    // Update data
+                    post.tags.push(newTag);
+                    
+                    // Update storage
+                    await this.updatePost(post);
+                }
+                tagInput.value = '';
+                tagInput.style.display = 'none';
+            } else if (e.key === 'Escape') {
+                tagInput.value = '';
+                tagInput.style.display = 'none';
+            }
+        });
+        
+        // Handle clicks outside the tag input
+        const clickOutsideHandler = (e) => {
+            if (!tagManageContainer.contains(e.target)) {
+                tagInput.style.display = 'none';
+            }
+        };
+        document.addEventListener('click', clickOutsideHandler);
+        
+        // Assemble components
+        tagManageContainer.appendChild(tagInput);
+        tagManageContainer.appendChild(addTagButton);
+        
+        tagsDiv.appendChild(tagsContainer);
+        tagsDiv.appendChild(tagManageContainer);
+        card.appendChild(tagsDiv);
+
+        // Add delete button
+        const deleteButton = document.createElement('button');
+        deleteButton.className = 'delete-button';
+        deleteButton.innerHTML = '&times;';
+        deleteButton.setAttribute('aria-label', 'Delete post');
+        deleteButton.addEventListener('click', () => this.deletePost(post.id));
+        card.appendChild(deleteButton);
+        
+        return card;
+    }
+
+    async createEmbed(post) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'embed-container';
+        
+        switch (post.type) {
+            case 'twitter':
+                const tweetUrl = new URL(post.url);
+                // Convert x.com URLs to twitter.com
+                const finalUrl = tweetUrl.hostname === 'x.com' 
+                    ? `https://twitter.com${tweetUrl.pathname}${tweetUrl.search}` 
+                    : post.url;
+                
+                wrapper.innerHTML = `
+                    <blockquote class="twitter-tweet" data-dnt="true" data-theme="light">
+                        <a href="${finalUrl}"></a>
+                    </blockquote>`;
+
+                // Wait for Twitter widget to be ready
+                if (window.twttr) {
+                    if (window.twttr.widgets) {
+                        window.twttr.widgets.load(wrapper);
+                    } else {
+                        window.twttr.ready((twttr) => {
+                            twttr.widgets.load(wrapper);
+                        });
+                    }
+                }
+                break;
+                
+            case 'instagram':
+                wrapper.innerHTML = `
+                    <blockquote class="instagram-media" data-instgrm-captioned 
+                        data-instgrm-permalink="${post.url}">
+                        <a href="${post.url}"></a>
+                    </blockquote>`;
+                
+                if (window.instgrm) {
+                    window.instgrm.Embeds.process(wrapper);
+                }
+                break;
+                
+            case 'youtube':
+                const videoId = this.getYoutubeId(post.url);
+                if (videoId) {
+                    wrapper.innerHTML = `
+                        <iframe width="100%" height="315" src="https://www.youtube.com/embed/${videoId}" 
+                            frameborder="0" allow="accelerometer; autoplay; clipboard-write; 
+                            encrypted-media; gyroscope; picture-in-picture" allowfullscreen>
+                        </iframe>`;
+                } else {
+                    wrapper.innerHTML = `<div class="error-embed">Invalid YouTube URL</div>`;
+                }
+                break;
+                
+            case 'linkedin':
+                // Extract the post ID from LinkedIn URL
+                const linkedinPostId = this.getLinkedinPostId(post.url);
+                console.log('LinkedIn post ID extracted:', linkedinPostId);
+                
+                if (linkedinPostId) {
+                    // Create a container for the LinkedIn embed
+                    wrapper.innerHTML = `
+                        <div class="linkedin-embed-container">
+                            <iframe src="https://www.linkedin.com/embed/feed/update/urn:li:${linkedinPostId}?collapsed=1" 
+                                height="399" width="100%" frameborder="0" allowfullscreen="" 
+                                title="Embedded LinkedIn post">
+                            </iframe>
+                        </div>`;
+                    
+                    // Force reload of the iframe to ensure it loads properly
+                    setTimeout(() => {
+                        const iframe = wrapper.querySelector('iframe');
+                        if (iframe) {
+                            const src = iframe.src;
+                            iframe.src = '';
+                            setTimeout(() => {
+                                iframe.src = src;
+                            }, 50);
+                        }
+                    }, 100);
+                } else {
+                    // If we couldn't extract a post ID, try to display as a website
+                    console.log('Falling back to website embed for LinkedIn URL');
+                    post.type = 'website';
+                    return this.createEmbed(post);
+                }
+                break;
+                
+            case 'website':
+                try {
+                    const urlObj = new URL(post.url);
+                    const faviconUrl = `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=128`;
+                    
+                    // Create the basic embed first with a loading indicator
+                    wrapper.innerHTML = `
+                        <div class="website-embed">
+                            <div class="website-header">
+                                <img src="${faviconUrl}" alt="Favicon" class="favicon" />
+                                <a href="${post.url}" target="_blank" rel="noopener noreferrer" class="website-link">
+                                    <span class="website-hostname">${urlObj.hostname}</span>
+                                </a>
+                            </div>
+                            <div class="website-preview">
+                                <a href="${post.url}" target="_blank" rel="noopener noreferrer">
+                                    <div class="meta-image-container loading">
+                                        <div class="loading-indicator"></div>
+                                    </div>
+                                </a>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Try to get meta image using a direct fetch with CORS proxy
+                    const corsProxyUrl = `https://corsproxy.io/?${encodeURIComponent(post.url)}`;
+                    
+                    // Fetch the HTML content
+                    fetch(corsProxyUrl)
+                        .then(response => response.text())
+                        .then(html => {
+                            // Create a DOM parser
+                            const parser = new DOMParser();
+                            const doc = parser.parseFromString(html, 'text/html');
+                            
+                            // Try to get Open Graph image
+                            let metaImage = doc.querySelector('meta[property="og:image"]');
+                            if (!metaImage) {
+                                // Try Twitter card image
+                                metaImage = doc.querySelector('meta[name="twitter:image"]');
+                            }
+                            if (!metaImage) {
+                                // Try other meta images
+                                metaImage = doc.querySelector('meta[property="image"]') || 
+                                           doc.querySelector('meta[name="image"]');
+                            }
+                            
+                            // Get meta title
+                            let metaTitle = doc.querySelector('meta[property="og:title"]');
+                            if (!metaTitle) {
+                                metaTitle = doc.querySelector('meta[name="twitter:title"]') || 
+                                           doc.querySelector('title');
+                            }
+                            
+                            // Get meta description
+                            let metaDesc = doc.querySelector('meta[property="og:description"]');
+                            if (!metaDesc) {
+                                metaDesc = doc.querySelector('meta[name="twitter:description"]') || 
+                                          doc.querySelector('meta[name="description"]');
+                            }
+                            
+                            const imgContainer = wrapper.querySelector('.meta-image-container');
+                            if (imgContainer) {
+                                imgContainer.classList.remove('loading');
+                                
+                                if (metaImage && metaImage.content) {
+                                    // Insert the meta image
+                                    imgContainer.innerHTML = `
+                                        <img src="${metaImage.content}" alt="Website preview" class="website-thumbnail" />
+                                        ${metaTitle ? `<div class="meta-title">${metaTitle.content || metaTitle.textContent}</div>` : ''}
+                                        ${metaDesc ? `<div class="meta-description">${metaDesc.content || metaDesc.textContent}</div>` : ''}
+                                    `;
+                                } else {
+                                    // No meta image found, show a default placeholder
+                                    imgContainer.innerHTML = `
+                                        <div class="placeholder-image">
+                                            <span>${urlObj.hostname}</span>
+                                        </div>
+                                        ${metaTitle ? `<div class="meta-title">${metaTitle.content || metaTitle.textContent}</div>` : ''}
+                                    `;
+                                }
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error fetching website content:', error);
+                            // Fallback to Microlink API if direct fetch fails
+                            this.fetchMicrolinkData(post.url, wrapper);
+                        });
+                } catch (e) {
+                    console.error('Error creating website embed:', e);
+                    wrapper.innerHTML = `
+                        <div class="unknown-embed">
+                            <a href="${post.url}" target="_blank" rel="noopener noreferrer">
+                                ${post.url}
+        }
+        break;
+        
+    case 'website':
+    getYoutubeId(url) {
+        const regex = /(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+        const match = url.match(regex);
+        return match ? match[1] : null;
+    }
+    
+    getLinkedinPostId(url) {
+        try {
+            console.log('Trying to extract LinkedIn post ID from:', url);
+            const urlObj = new URL(url);
+            
+            // Handle different LinkedIn URL formats
+            if (url.includes('/posts/')) {
+                console.log('URL contains /posts/');
+                // Format: linkedin.com/posts/username_detail_postid_activity
+                const activityMatch = url.match(/activity-([0-9]+)/);
+                if (activityMatch && activityMatch[1]) {
+                    console.log('Found activity match:', activityMatch[1]);
+                    return `ugcPost:${activityMatch[1]}`;
+                }
+                
+                // Format: linkedin.com/posts/postid
+                const postsMatch = url.match(/\/posts\/([0-9]+)/);
+                if (postsMatch && postsMatch[1]) {
+                    console.log('Found posts match:', postsMatch[1]);
+                    return `ugcPost:${postsMatch[1]}`;
+                }
+            }
+            
+            // Format: linkedin.com/feed/update/urn:li:activity:postid
+            if (url.includes('/feed/update/')) {
+                console.log('URL contains /feed/update/');
+                const match = url.match(/urn:li:([^:]+):([0-9]+)/);
+                if (match && match[1] && match[2]) {
+                    console.log('Found feed update match:', match[1], match[2]);
+                    return `${match[1]}:${match[2]}`;
+                }
+            }
+            
+            // Format: linkedin.com/posts/username_title_activity-postid
+            console.log('Checking for activity- pattern');
+            const activityIdMatch = url.match(/activity-([0-9]+)/);
+            if (activityIdMatch && activityIdMatch[1]) {
+                console.log('Found activity ID match:', activityIdMatch[1]);
+                return `ugcPost:${activityIdMatch[1]}`;
+            }
+            
+            // Format: linkedin.com/posts/username_anything_lSVl with activity ID in the URL
+            console.log('Checking for activity_ pattern');
+            const activityParamMatch = url.match(/activity[_]([0-9]+)/);
+            if (activityParamMatch && activityParamMatch[1]) {
+                console.log('Found activity param match:', activityParamMatch[1]);
+                return `ugcPost:${activityParamMatch[1]}`;
+            }
+            
+            // Direct extraction of numbers after 'activity'
+            console.log('Trying direct extraction of activity number');
+            const directActivityMatch = url.match(/activity[^0-9]*([0-9]+)/);
+            if (directActivityMatch && directActivityMatch[1]) {
+                console.log('Found direct activity match:', directActivityMatch[1]);
+                return `ugcPost:${directActivityMatch[1]}`;
+            }
+            
+            console.log('LinkedIn URL format not recognized:', url);
+            return null;
+        } catch (e) {
+            console.error('Error parsing LinkedIn URL:', e);
+            return null;
+        }
+    }
+    
+    fetchMicrolinkData(url, wrapper) {
+        // Fallback to Microlink API
+        const metaImageUrl = `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&screenshot=false`;
+        
+        fetch(metaImageUrl)
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    const imgContainer = wrapper.querySelector('.meta-image-container');
+                    if (imgContainer) {
+                        imgContainer.classList.remove('loading');
+                        
+                        let content = '';
+                        
+                        // Add image if available
+                        if (data.data.image && data.data.image.url) {
+                            content += `<img src="${data.data.image.url}" alt="Website preview" class="website-thumbnail" />`;
+                        } else {
+                            content += `<div class="placeholder-image"><span>${new URL(url).hostname}</span></div>`;
+                        }
+                        
+                        // Add title if available
+                        if (data.data.title) {
+                            content += `<div class="meta-title">${data.data.title}</div>`;
+                        }
+                        
+                        // Add description if available
+                        if (data.data.description) {
+                            content += `<div class="meta-description">${data.data.description}</div>`;
+                        }
+                        
+                        imgContainer.innerHTML = content;
+                    }
+                } else {
+                    // If Microlink fails, show a basic placeholder
+                    const imgContainer = wrapper.querySelector('.meta-image-container');
+                    if (imgContainer) {
+                        imgContainer.classList.remove('loading');
+                        imgContainer.innerHTML = `<div class="placeholder-image"><span>${new URL(url).hostname}</span></div>`;
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching Microlink data:', error);
+                // Show basic placeholder if all else fails
+                const imgContainer = wrapper.querySelector('.meta-image-container');
+                if (imgContainer) {
+                    imgContainer.classList.remove('loading');
+                    imgContainer.innerHTML = `<div class="placeholder-image"><span>${new URL(url).hostname}</span></div>`;
+                }
+            });
+    }
+
+    async renderPosts() {
+        const postsContainer = document.getElementById('posts');
+        if (!postsContainer) {
+            console.log('Posts container not found');
+            return;
+        }
+        
+        postsContainer.innerHTML = '';
+        
+        // Filter posts if filters are active
+        let filteredPosts = this.posts;
+        if (this.activeFilters.size > 0) {
+            filteredPosts = this.posts.filter(post => {
+                // Only show posts that have ALL selected tags
+                return Array.from(this.activeFilters).every(tag => post.tags.includes(tag));
+            });
+        }
+        
+        // Sort posts from latest to oldest
+        filteredPosts.sort((a, b) => {
+            return new Date(b.date) - new Date(a.date);
+        });
+        
+        console.log('Filtered and sorted posts:', filteredPosts);
+
+        for (const post of filteredPosts) {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.setAttribute('data-post-id', post.id);
+            
+            const embed = await this.createEmbed(post);
+            card.appendChild(embed);
+
+            const tagsDiv = document.createElement('div');
+            tagsDiv.className = 'card-tags';
+            
+            // Create tags container
+            const tagsContainer = document.createElement('div');
+            tagsContainer.className = 'tags-container';
+            post.tags.forEach(tag => {
+                const tagSpan = document.createElement('span');
+                tagSpan.className = 'tag';
+                tagSpan.innerHTML = `
+                    ${tag}
+                    <button class="tag-delete" aria-label="Remove tag">&times;</button>
+                `;
+                tagSpan.querySelector('.tag-delete').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const updatedTags = post.tags.filter(t => t !== tag);
+                    this.updatePost({ ...post, tags: updatedTags });
+                });
+                tagsContainer.appendChild(tagSpan);
+            });
+            
+            // Add new tag button
+            const tagManageContainer = document.createElement('div');
+            tagManageContainer.className = 'tag-input-container';
+            
+            const tagInput = document.createElement('input');
+            tagInput.type = 'text';
+            tagInput.className = 'inline-tag-input';
+            tagInput.placeholder = 'Add tag...';
+            tagInput.style.display = 'none';
+            
+            const addTagButton = document.createElement('button');
+            addTagButton.className = 'add-tag-button';
+            addTagButton.innerHTML = '<span>+</span>';
+            
+            addTagButton.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (tagInput.style.display === 'none') {
+                    tagInput.style.display = 'block';
+                    tagInput.focus();
+                } else {
+                    tagInput.style.display = 'none';
+                }
+            });
+            
+            tagInput.addEventListener('keydown', async (e) => {
+                if (e.key === 'Enter') {
+                    const newTag = tagInput.value.trim();
+                    if (newTag) {
+                        // Add tag directly to UI
+                        const tagSpan = document.createElement('span');
+                        tagSpan.className = 'tag';
+                        tagSpan.innerHTML = `
+                            ${newTag}
+                            <button class="tag-delete" aria-label="Remove tag">&times;</button>
+                        `;
+                        
+                        // Add delete handler
+                        tagSpan.querySelector('.tag-delete').addEventListener('click', (evt) => {
+                            evt.stopPropagation();
+                            const updatedTags = post.tags.filter(t => t !== newTag);
+                            tagSpan.remove(); // Remove immediately
+                            this.updatePost({ ...post, tags: updatedTags });
+                        });
+                        
+                        tagsContainer.appendChild(tagSpan);
+                        
+                        // Update post
+                        const updatedTags = [...post.tags, newTag];
+                        await this.updatePost({ ...post, tags: updatedTags });
+                    }
+                    tagInput.value = '';
+                    tagInput.style.display = 'none';
+                } else if (e.key === 'Escape') {
+                    tagInput.value = '';
+                    tagInput.style.display = 'none';
+                }
+            });
+            
+            document.addEventListener('click', (e) => {
+                if (!tagManageContainer.contains(e.target)) {
+                    tagInput.style.display = 'none';
+                }
+            });
+            
+            tagManageContainer.appendChild(tagInput);
+            tagManageContainer.appendChild(addTagButton);
+            
+            tagsDiv.appendChild(tagsContainer);
+            tagsDiv.appendChild(tagManageContainer);
+            card.appendChild(tagsDiv);
+
+            // Minimal delete button
+            const deleteButton = document.createElement('button');
+            deleteButton.className = 'delete-button';
+            deleteButton.innerHTML = '&times;';
+            deleteButton.setAttribute('aria-label', 'Delete post');
+            deleteButton.addEventListener('click', () => this.deletePost(post.id));
+            card.appendChild(deleteButton);
+
+            const grid = document.getElementById('posts');
+            if (grid) {
+                grid.appendChild(card);
+            }
+        }
+        
+        // Reload social media widgets
+        if (window.twttr) {
+            window.twttr.widgets.load();
+        }
+        if (window.instgrm) {
+            window.instgrm.Embeds.process();
+        }
+    }
+}
+
+// Initialize the app
+document.addEventListener('DOMContentLoaded', () => {
+    new SocialEmbedViewer();
+});

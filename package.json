@@ -1,0 +1,13 @@
+{
+  "name": "social-embed-viewer",
+  "version": "1.0.0",
+  "description": "A social media embed viewer with cloud synchronization",
+  "main": "app.js",
+  "scripts": {
+    "start": "http-server -p 8000"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "http-server": "^14.1.1"
+  }
+}

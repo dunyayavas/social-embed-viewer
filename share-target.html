@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Processing Shared Link - Social Media Embed Viewer</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .share-handler {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .loading-indicator {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="share-handler">
+        <h2>Processing shared link...</h2>
+        <div class="loading-indicator">
+            <div class="spinner"></div>
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Parse URL parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            const sharedUrl = urlParams.get('url') || '';
+            const sharedText = urlParams.get('text') || '';
+            
+            // Try to extract URL from text if no direct URL provided
+            let finalUrl = sharedUrl;
+            if (!finalUrl && sharedText) {
+                const urlMatch = sharedText.match(/https?:\/\/[^\s]+/);
+                if (urlMatch) {
+                    finalUrl = urlMatch[0];
+                }
+            }
+            
+            if (finalUrl) {
+                // Store the shared URL temporarily
+                sessionStorage.setItem('pendingSharedUrl', finalUrl);
+                
+                // Redirect to main app
+                window.location.href = './index.html?share=pending';
+            } else {
+                // Handle error case
+                window.location.href = './index.html?share=error';
+            }
+        });
+    </script>
+</body>
+</html>

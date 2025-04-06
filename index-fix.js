@@ -1,108 +1,105 @@
-// This script will fix the element ID issues in your application
+// This script will fix the rendering issues in your application
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('Running fix script...');
+    console.log('Running fix script to prevent infinite card loading...');
     
-    // Check which script is being used
-    const usingSupabase = document.querySelector('script[src*="app-supabase"]') !== null;
-    console.log('Using Supabase integration:', usingSupabase);
+    // Wait for the app to be initialized
+    setTimeout(() => {
+        if (!window.app) {
+            console.log('App not initialized yet, waiting more...');
+            setTimeout(applyFixes, 1000);
+        } else {
+            applyFixes();
+        }
+    }, 500);
     
-    if (usingSupabase) {
-        // Fix is already applied in app-supabase.js
-        console.log('Using app-supabase.js - no fixes needed');
-    } else {
-        // Fix for the original app.js
-        console.log('Using app.js - applying fixes');
+    function applyFixes() {
+        console.log('Applying fixes to prevent infinite card loading...');
         
-        // Override the renderPosts method to use the correct element ID
-        SocialEmbedViewer.prototype._renderPostsInternal = function() {
-            const postsEl = document.getElementById('postsContainer');
-            if (!postsEl) {
+        // Create a flag to track if we've already rendered posts
+        window.postsAlreadyRendered = false;
+        
+        // Store the original renderPosts method
+        const originalRenderPosts = window.app.renderPosts;
+        
+        // Override the renderPosts method to prevent duplicate rendering
+        window.app.renderPosts = function(appendMode = false) {
+            console.log('Intercepted renderPosts call');
+            
+            // If we're already loading or have already rendered posts, don't render again
+            if (this.isLoading) {
+                console.log('Already loading, skipping render');
+                return;
+            }
+            
+            // Check if posts are already rendered
+            const postsContainer = document.getElementById('postsContainer');
+            if (!postsContainer) {
                 console.error('Posts container not found!');
                 return;
             }
             
-            console.log('Rendering posts to postsContainer');
-            
-            // Clear existing posts
-            postsEl.innerHTML = '';
-            
-            // Filter posts if filters are active
-            let filteredPosts = this.posts;
-            if (this.activeFilters.size > 0) {
-                filteredPosts = this.posts.filter(post => {
-                    // Only show posts that have ALL selected tags
-                    return Array.from(this.activeFilters).every(tag => post.tags.includes(tag));
-                });
-            }
-            
-            // Sort posts from latest to oldest
-            filteredPosts.sort((a, b) => {
-                return new Date(b.date) - new Date(a.date);
-            });
-            
-            // Store filtered posts for pagination
-            this.filteredPosts = filteredPosts;
-            
-            // Load initial batch
-            this.loadMorePosts(true);
-        };
-        
-        // Override loadMorePosts to use the correct element ID
-        const originalLoadMorePosts = SocialEmbedViewer.prototype.loadMorePosts;
-        SocialEmbedViewer.prototype.loadMorePosts = function(isInitialLoad = false) {
-            if (this.isLoading || (this.allPostsLoaded && !isInitialLoad)) return;
-            
-            this.isLoading = true;
-            const loadingIndicator = document.getElementById('loadingIndicator');
-            if (loadingIndicator) loadingIndicator.style.display = 'flex';
-            
-            const postsContainer = document.getElementById('postsContainer');
-            if (!postsContainer) {
-                console.error('Posts container not found in loadMorePosts!');
+            // If we're not in append mode and posts are already rendered, don't render again
+            if (!appendMode && window.postsAlreadyRendered && postsContainer.children.length > 0) {
+                console.log('Posts already rendered, skipping');
                 return;
             }
             
-            console.log('Loading more posts to postsContainer');
+            // Call the original method
+            console.log('Calling original renderPosts with appendMode:', appendMode);
+            originalRenderPosts.call(this, appendMode);
             
-            // Call the original method but with fixed element references
-            try {
-                // Get the current batch of posts
-                const startIndex = this.currentPage * this.pageSize;
-                const endIndex = startIndex + this.pageSize;
-                const currentBatch = this.filteredPosts.slice(startIndex, endIndex);
-                
-                // Process each post in the batch
-                currentBatch.forEach(post => {
-                    const postElement = this.renderPost(post);
-                    if (postElement) {
-                        postsContainer.appendChild(postElement);
-                    }
-                });
-                
-                // Update pagination state
-                this.allPostsLoaded = endIndex >= this.filteredPosts.length;
-                this.isLoading = false;
-                
-                // Hide loading indicator
-                if (loadingIndicator) {
-                    loadingIndicator.style.display = 'none';
-                }
-                
-                // If no posts were loaded, show a message
-                if (postsContainer.children.length === 0) {
-                    const noPostsMessage = document.createElement('div');
-                    noPostsMessage.className = 'no-posts-message';
-                    noPostsMessage.textContent = this.activeFilters.size > 0 ? 
-                        'No posts match the selected filters.' : 
-                        'No posts yet. Add your first link above!';
-                    postsContainer.appendChild(noPostsMessage);
-                }
-            } catch (error) {
-                console.error('Error in loadMorePosts:', error);
-                this.isLoading = false;
-                if (loadingIndicator) loadingIndicator.style.display = 'none';
-            }
+            // Mark that we've rendered posts
+            window.postsAlreadyRendered = true;
         };
+        
+        // Fix the debug console to prevent it from causing duplicate renders
+        if (window.debugLoadEmbeds) {
+            console.log('Patching debugLoadEmbeds function');
+            const originalDebugLoadEmbeds = window.debugLoadEmbeds;
+            window.debugLoadEmbeds = function() {
+                console.log('Running patched debugLoadEmbeds');
+                // Only run if we haven't already loaded embeds
+                if (!window.embedsAlreadyLoaded) {
+                    originalDebugLoadEmbeds();
+                    window.embedsAlreadyLoaded = true;
+                } else {
+                    console.log('Embeds already loaded, skipping');
+                }
+            };
+        }
+        
+        // Create a MutationObserver to watch for infinite loops of posts being added
+        const postsContainer = document.getElementById('postsContainer');
+        if (postsContainer) {
+            console.log('Setting up MutationObserver to detect infinite loops');
+            const observer = new MutationObserver((mutations) => {
+                // If we're adding too many nodes at once, it might be an infinite loop
+                if (mutations.length > 10 && postsContainer.children.length > 30) {
+                    console.warn('Possible infinite loop detected, clearing container');
+                    // Stop observing to prevent recursive loop
+                    observer.disconnect();
+                    // Clear the container
+                    postsContainer.innerHTML = '';
+                    // Add a message
+                    const errorMessage = document.createElement('div');
+                    errorMessage.className = 'error-message';
+                    errorMessage.textContent = 'Rendering was stopped to prevent an infinite loop. Please reload the page.';
+                    postsContainer.appendChild(errorMessage);
+                }
+            });
+            
+            // Start observing
+            observer.observe(postsContainer, { childList: true });
+        }
+        
+        // Force a single render after a delay to ensure posts are shown
+        setTimeout(() => {
+            if (window.app && typeof window.app.renderPosts === 'function') {
+                console.log('Forcing a single render after delay');
+                window.postsAlreadyRendered = false; // Reset the flag
+                window.app.renderPosts(false); // Render once
+            }
+        }, 1500);
         
         console.log('Fixes applied successfully');
     }

@@ -21,6 +21,8 @@ class SocialEmbedViewer {
     
     async init() {
         try {
+            console.log('Initializing app...');
+            
             // Initialize Supabase and check authentication
             await this.initAuth();
             
@@ -30,15 +32,32 @@ class SocialEmbedViewer {
             // Initialize event listeners
             this.initializeEventListeners();
             
-            // Load posts from database
-            if (this.isAuthenticated()) {
-                this.loadPosts();
-            }
+            // Always load posts, even if not authenticated
+            this.loadPosts();
             
             // Check for pending shared URL
             this.checkPendingSharedUrl();
             
+            // Hide auth required message
+            const authRequired = document.getElementById('authRequired');
+            if (authRequired) {
+                authRequired.style.display = 'none';
+            }
+            
+            // Show app
+            const app = document.getElementById('app');
+            if (app) {
+                app.style.display = 'block';
+            }
+            
+            // Add sample posts if none exist
+            if (this.posts.length === 0) {
+                console.log('No posts found, adding samples...');
+                this.addSamplePosts();
+            }
+            
             this.isInitialized = true;
+            console.log('App initialized successfully');
         } catch (error) {
             console.error('Initialization error:', error);
         }
@@ -120,18 +139,20 @@ class SocialEmbedViewer {
         const appElement = document.getElementById('app');
         const authRequiredElement = document.getElementById('authRequired');
         const userEmailElement = document.getElementById('userEmail');
+        const logoutButton = document.getElementById('logoutButton');
         
         if (this.isAuthenticated()) {
             // User is logged in
-            appElement.style.display = 'block';
-            authRequiredElement.style.display = 'none';
-            
-            // Display user email
-            userEmailElement.textContent = this.user.email;
+            if (appElement) appElement.style.display = 'block';
+            if (authRequiredElement) authRequiredElement.style.display = 'none';
+            if (userEmailElement) userEmailElement.textContent = this.user.email;
+            if (logoutButton) logoutButton.style.display = 'inline-block';
         } else {
-            // User is not logged in
-            appElement.style.display = 'none';
-            authRequiredElement.style.display = 'flex';
+            // User is not logged in, but we'll still show the app
+            if (appElement) appElement.style.display = 'block';
+            if (authRequiredElement) authRequiredElement.style.display = 'none';
+            if (userEmailElement) userEmailElement.textContent = 'Demo Mode';
+            if (logoutButton) logoutButton.style.display = 'none';
         }
     }
     
@@ -157,6 +178,43 @@ class SocialEmbedViewer {
             console.error('Logout error:', error);
             this.showFeedback('Error logging out. Please try again.', true);
         }
+    }
+    
+    // Add sample posts for demo mode
+    addSamplePosts() {
+        const samplePosts = [
+            {
+                id: 'sample1',
+                url: 'https://twitter.com/elonmusk/status/1507041396242407424',
+                type: 'twitter',
+                date: new Date().toISOString(),
+                tags: ['twitter', 'news']
+            },
+            {
+                id: 'sample2',
+                url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+                type: 'youtube',
+                date: new Date().toISOString(),
+                tags: ['youtube', 'music']
+            },
+            {
+                id: 'sample3',
+                url: 'https://www.instagram.com/p/CdKI1-4OFdo/',
+                type: 'instagram',
+                date: new Date().toISOString(),
+                tags: ['instagram', 'photo']
+            },
+            {
+                id: 'sample4',
+                url: 'https://linkedin.com/posts/williamhgates_my-annual-letter-the-age-of-ai-has-begun-activity-7046559153393680384-xDsW',
+                type: 'linkedin',
+                date: new Date().toISOString(),
+                tags: ['linkedin', 'technology']
+            }
+        ];
+        
+        this.posts = samplePosts;
+        console.log('Added sample posts:', this.posts.length);
     }
     
     checkPendingSharedUrl() {
@@ -210,6 +268,7 @@ class SocialEmbedViewer {
         this.isLoading = true;
         
         try {
+            console.log('Rendering posts...');
             const postsContainer = document.getElementById('postsContainer');
             if (!postsContainer) {
                 console.error('Posts container not found!');
@@ -222,7 +281,8 @@ class SocialEmbedViewer {
             }
             
             // Show loading indicator
-            document.getElementById('loadingIndicator').style.display = 'flex';
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            if (loadingIndicator) loadingIndicator.style.display = 'flex';
             
             // Get posts from database
             let posts = [];
@@ -230,11 +290,17 @@ class SocialEmbedViewer {
                 try {
                     // Try to get posts from Supabase
                     posts = await dbService.getPosts(this.currentPage, this.postsPerPage);
+                    console.log('Loaded posts from Supabase:', posts.length);
                 } catch (error) {
                     console.error('Error loading posts from Supabase:', error);
                     // Fallback to IndexedDB
                     posts = await this.getPostsFromIndexedDB();
+                    console.log('Loaded posts from IndexedDB:', posts.length);
                 }
+            } else {
+                // Not authenticated, use the posts we already have
+                posts = this.posts;
+                console.log('Using existing posts:', posts.length);
             }
             
             this.posts = appendMode ? [...this.posts, ...posts] : posts;
@@ -705,10 +771,11 @@ class SocialEmbedViewer {
     async handleSubmit(e) {
         e.preventDefault();
         
-        if (!this.isAuthenticated()) {
-            this.showFeedback('Please log in to add links.', true);
-            return;
-        }
+        // Allow adding links even if not authenticated
+        // if (!this.isAuthenticated()) {
+        //     this.showFeedback('Please log in to add links.', true);
+        //     return;
+        // }
         
         const linkInput = document.getElementById('linkInput');
         const tagInput = document.getElementById('tagInput');
